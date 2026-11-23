@@ -31,7 +31,7 @@ def test_fred_uses_api_when_key_set(monkeypatch):
     )
     urls = []
 
-    def fake_fetch(url, timeout=30):
+    def fake_fetch(url, timeout=30, retries=3):
         urls.append(url)
         return raw
 
@@ -42,9 +42,19 @@ def test_fred_uses_api_when_key_set(monkeypatch):
     # without a key the keyless CSV download is used
     monkeypatch.delenv("FRED_API_KEY")
     monkeypatch.setattr(
-        data, "_fetch", lambda url, timeout=30: b"observation_date,DGS2\n2026-10-01,3.5\n"
+        data, "_fetch", lambda url, **kw: b"observation_date,DGS2\n2026-10-01,3.5\n"
     )
     assert data.load_fred_series("DGS2").iloc[-1] == 3.5
+
+
+def test_fred_reports_both_errors_when_api_and_csv_fail(monkeypatch):
+    def boom(url, **kw):
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(data, "_fetch", boom)
+    monkeypatch.setenv("FRED_API_KEY", "abc")
+    with pytest.raises(RuntimeError, match="FRED API: TimeoutError.*FRED CSV: TimeoutError"):
+        data.load_fred_series("DGS2")
 
 
 def _series(last: str) -> pd.Series:

@@ -37,7 +37,7 @@ def _fetch(url: str, timeout: int = 30, retries: int = 3) -> bytes:
 
 
 def _load_fred_api(series_id: str, key: str) -> pd.Series:
-    raw = _fetch(FRED_API_URL.format(series_id=series_id, key=key))
+    raw = _fetch(FRED_API_URL.format(series_id=series_id, key=key), timeout=20, retries=2)
     obs = json.loads(raw)["observations"]
     s = pd.Series(
         pd.to_numeric([o["value"] for o in obs], errors="coerce"),  # "." marks a missing value
@@ -53,12 +53,20 @@ def load_fred_series(series_id: str) -> pd.Series:
     Uses the FRED API when FRED_API_KEY is set, falling back to the keyless CSV download.
     """
     key = os.environ.get("FRED_API_KEY", "").strip()
+    api_error = None
     if key:
         try:
             return _load_fred_api(series_id, key)
-        except Exception:  # noqa: BLE001 - fall back to the CSV download
-            pass
-    df = pd.read_csv(io.BytesIO(_fetch(FRED_CSV_URL.format(series_id=series_id))))
+        except Exception as exc:  # noqa: BLE001 - fall back to the CSV download
+            api_error = f"FRED API: {type(exc).__name__}: {exc}"
+    try:
+        # One quick attempt when the API already failed, so a blocked network fails fast.
+        raw = _fetch(FRED_CSV_URL.format(series_id=series_id), timeout=20, retries=1 if key else 2)
+    except Exception as exc:
+        if api_error:
+            raise RuntimeError(f"{api_error}; FRED CSV: {type(exc).__name__}: {exc}") from exc
+        raise
+    df = pd.read_csv(io.BytesIO(raw))
     s = pd.Series(
         pd.to_numeric(df[series_id], errors="coerce").to_numpy(),
         index=pd.DatetimeIndex(pd.to_datetime(df[df.columns[0]]), name="date"),

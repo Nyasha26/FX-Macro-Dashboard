@@ -25,22 +25,28 @@ except Exception:  # noqa: BLE001 - no secrets file locally is fine
 
 
 @st.cache_data(ttl=60 * 60 * 12, show_spinner="Downloading data from FRED and Yahoo Finance...")
-def get_data(series_ids: tuple[str, ...]) -> dict:
-    # series_ids is only a cache key: adding a series to the catalogue forces a fresh download.
+def get_data(series_ids: tuple[str, ...], has_key: bool) -> dict:
+    # Both arguments are only cache keys: adding a series to the catalogue, or adding a FRED
+    # API key, forces a fresh download instead of reusing a cached failure.
     return load_all()
 
 
 @st.cache_data(ttl=60 * 60 * 12, show_spinner="Downloading this economy's data...")
-def get_country(code: str, sources: str) -> dict:
+def get_country(code: str, sources: str, has_key: bool) -> dict:
     # sources is only a cache key: editing a country's catalogue forces a fresh download.
     return load_country(COUNTRIES[code])
 
 
+HAS_FRED_KEY = bool(os.environ.get("FRED_API_KEY", "").strip())
+
+
 def country_data(code: str) -> dict:
-    return get_country(code, repr(COUNTRIES[code].sources))
+    return get_country(code, repr(COUNTRIES[code].sources), HAS_FRED_KEY)
 
 
-data = get_data(tuple(MACRO_VARS) + tuple(FX_PAIRS) + (DOLLAR_INDEX,) + FED_TARGET_IDS)
+data = get_data(
+    tuple(MACRO_VARS) + tuple(FX_PAIRS) + (DOLLAR_INDEX,) + FED_TARGET_IDS, HAS_FRED_KEY
+)
 
 with st.sidebar:
     st.header("Settings")
@@ -63,6 +69,11 @@ with st.sidebar:
     st.caption(
         "Data: FRED (St. Louis Fed); Yahoo Finance for USDCLP; BIS and OECD where a FRED "
         "series for another G10 economy has stopped updating. Cached for 12 hours."
+    )
+    st.caption(
+        "FRED API key: **found**, using the FRED API."
+        if HAS_FRED_KEY
+        else "FRED API key: **not set**, using FRED's keyless download."
     )
 
 missing = [k for k in MACRO_VARS if k not in data["macro"]]
