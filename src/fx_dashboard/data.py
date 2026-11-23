@@ -1,6 +1,8 @@
 """Data loading from FRED (public CSV, no key) and Yahoo Finance."""
 
 import io
+import json
+import os
 import threading
 import time
 import urllib.request
@@ -13,6 +15,12 @@ from fx_dashboard.countries import Country, Source
 from fx_dashboard.series import DOLLAR_INDEX, FED_TARGET_IDS, FX_PAIRS, MACRO_VARS, FxPair
 
 FRED_CSV_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
+# The official FRED API. The CSV download above needs no key but can hang when called from
+# cloud servers (e.g. Streamlit Community Cloud), so the API is used whenever a key is set.
+FRED_API_URL = (
+    "https://api.stlouisfed.org/fred/series/observations"
+    "?series_id={series_id}&api_key={key}&file_type=json"
+)
 
 
 def _fetch(url: str, timeout: int = 30, retries: int = 3) -> bytes:
@@ -28,8 +36,28 @@ def _fetch(url: str, timeout: int = 30, retries: int = 3) -> bytes:
     raise RuntimeError("unreachable")
 
 
+def _load_fred_api(series_id: str, key: str) -> pd.Series:
+    raw = _fetch(FRED_API_URL.format(series_id=series_id, key=key))
+    obs = json.loads(raw)["observations"]
+    s = pd.Series(
+        pd.to_numeric([o["value"] for o in obs], errors="coerce"),  # "." marks a missing value
+        index=pd.DatetimeIndex(pd.to_datetime([o["date"] for o in obs]), name="date"),
+        name=series_id,
+    )
+    return s.dropna()
+
+
 def load_fred_series(series_id: str) -> pd.Series:
-    """Download one FRED series as a float Series indexed by date (missing values dropped)."""
+    """Download one FRED series as a float Series indexed by date (missing values dropped).
+
+    Uses the FRED API when FRED_API_KEY is set, falling back to the keyless CSV download.
+    """
+    key = os.environ.get("FRED_API_KEY", "").strip()
+    if key:
+        try:
+            return _load_fred_api(series_id, key)
+        except Exception:  # noqa: BLE001 - fall back to the CSV download
+            pass
     df = pd.read_csv(io.BytesIO(_fetch(FRED_CSV_URL.format(series_id=series_id))))
     s = pd.Series(
         pd.to_numeric(df[series_id], errors="coerce").to_numpy(),

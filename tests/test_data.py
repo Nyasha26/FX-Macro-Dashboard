@@ -24,6 +24,29 @@ def test_sdmx_rejects_several_series():
         data._sdmx_series(raw, "z")
 
 
+def test_fred_uses_api_when_key_set(monkeypatch):
+    raw = (
+        b'{"observations": [{"date": "2026-10-01", "value": "3.5"},'
+        b' {"date": "2026-11-01", "value": "."}]}'
+    )
+    urls = []
+
+    def fake_fetch(url, timeout=30):
+        urls.append(url)
+        return raw
+
+    monkeypatch.setattr(data, "_fetch", fake_fetch)
+    monkeypatch.setenv("FRED_API_KEY", "abc")
+    s = data.load_fred_series("DGS2")
+    assert "api.stlouisfed.org" in urls[0] and len(s) == 1 and s.iloc[-1] == 3.5
+    # without a key the keyless CSV download is used
+    monkeypatch.delenv("FRED_API_KEY")
+    monkeypatch.setattr(
+        data, "_fetch", lambda url, timeout=30: b"observation_date,DGS2\n2026-10-01,3.5\n"
+    )
+    assert data.load_fred_series("DGS2").iloc[-1] == 3.5
+
+
 def _series(last: str) -> pd.Series:
     return pd.Series(1.0, index=pd.date_range(end=last, periods=24, freq="MS"))
 

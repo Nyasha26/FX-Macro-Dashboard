@@ -1,5 +1,6 @@
 """Streamlit entry point. Run with: streamlit run src/fx_dashboard/app.py"""
 
+import os
 from datetime import date
 
 import streamlit as st
@@ -13,6 +14,14 @@ from fx_dashboard.views import dollar_tab, fed_tab, macro_tab, pair_regimes_tab,
 TITLE = "Nyasha Mugabe FX Macro Dashboard"
 
 st.set_page_config(page_title=TITLE, layout="wide")
+
+# A FRED API key stored in Streamlit secrets (Settings -> Secrets on Community Cloud) is
+# passed to the data loader through the environment. Without one the keyless CSV is used.
+try:
+    if "FRED_API_KEY" in st.secrets:
+        os.environ.setdefault("FRED_API_KEY", str(st.secrets["FRED_API_KEY"]))
+except Exception:  # noqa: BLE001 - no secrets file locally is fine
+    pass
 
 
 @st.cache_data(ttl=60 * 60 * 12, show_spinner="Downloading data from FRED and Yahoo Finance...")

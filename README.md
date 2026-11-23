@@ -90,6 +90,10 @@ tests/            unit tests for analysis code
 4. Click **Deploy**. Streamlit installs `requirements.txt` (this project plus its
    dependencies) and gives the app a public `*.streamlit.app` URL.
 5. In the app's **Settings → Sharing**, make sure it is set to **Public**.
+6. **FRED API key (needed on Streamlit Cloud).** FRED's keyless CSV download times out from
+   cloud servers. Get a free key at <https://fredaccount.stlouisfed.org/apikeys>, then in
+   the app's **Settings → Secrets** paste `FRED_API_KEY = "your-key"` and save. Locally the
+   key is optional (set the `FRED_API_KEY` environment variable to use it).
 
 Every push to `main` redeploys automatically. Free apps go to sleep after a period with
 no visitors; the next visitor wakes them with one click (about 30 seconds).
