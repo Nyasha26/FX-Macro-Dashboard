@@ -66,3 +66,22 @@ FX_PAIRS: dict[str, FxPair] = {
         FxPair("USDCLP", "yahoo", "CLP=X", note="Yahoo Finance daily close"),
     ]
 }
+
+# USD against the remaining G10 currencies, used by the G10 vs US tab. Kept apart from FX_PAIRS
+# so the other tabs keep their pair list. Every G10 economy's pair is "USD" + its currency.
+G10_PAIRS: dict[str, FxPair] = {
+    p.name: p
+    for p in [
+        FxPair("USDAUD", "fred", "DEXUSAL", invert=True, note="Inverted from FRED AUD/USD"),
+        FxPair("USDCAD", "fred", "DEXCAUS"),
+        FxPair("USDNZD", "fred", "DEXUSNZ", invert=True, note="Inverted from FRED NZD/USD"),
+        FxPair("USDNOK", "fred", "DEXNOUS"),
+        FxPair("USDSEK", "fred", "DEXSDUS"),
+    ]
+}
+
+# US counterparts for economies whose short rate is a 3-month rate (the G10 vs US tab compares
+# like with like): 3-month Treasury bill and the 10Y Treasury minus 3M bill spread.
+US_3M = "DTB3"
+US_10Y3M = "T10Y3M"
+US_EXTRA = (US_3M, US_10Y3M)

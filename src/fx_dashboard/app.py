@@ -8,8 +8,22 @@ import streamlit as st
 from fx_dashboard import theme  # noqa: F401 - registers the Plotly template
 from fx_dashboard.countries import COUNTRIES
 from fx_dashboard.data import load_all, load_country
-from fx_dashboard.series import DOLLAR_INDEX, FED_TARGET_IDS, FX_PAIRS, MACRO_VARS
-from fx_dashboard.views import dollar_tab, fed_tab, macro_tab, pair_regimes_tab, pairs_tab
+from fx_dashboard.series import (
+    DOLLAR_INDEX,
+    FED_TARGET_IDS,
+    FX_PAIRS,
+    G10_PAIRS,
+    MACRO_VARS,
+    US_EXTRA,
+)
+from fx_dashboard.views import (
+    dollar_tab,
+    fed_tab,
+    g10_tab,
+    macro_tab,
+    pair_regimes_tab,
+    pairs_tab,
+)
 
 TITLE = "Nyasha Mugabe FX Macro Dashboard"
 
@@ -45,7 +59,13 @@ def country_data(code: str) -> dict:
 
 
 data = get_data(
-    tuple(MACRO_VARS) + tuple(FX_PAIRS) + (DOLLAR_INDEX,) + FED_TARGET_IDS, HAS_FRED_KEY
+    tuple(MACRO_VARS)
+    + tuple(FX_PAIRS)
+    + tuple(G10_PAIRS)
+    + US_EXTRA
+    + (DOLLAR_INDEX,)
+    + FED_TARGET_IDS,
+    HAS_FRED_KEY,
 )
 
 with st.sidebar:
@@ -87,13 +107,14 @@ if missing or data["dollar"] is None:
 
 st.title(TITLE)
 fed_target = data.get("fed_target")
-tab_macro, tab_dollar, tab_pairs, tab_pair_regimes, tab_fed = st.tabs(
+tab_macro, tab_dollar, tab_pairs, tab_pair_regimes, tab_fed, tab_g10 = st.tabs(
     [
         "Macro Variables",
         "Dollar Index Regimes",
         "FX Pairs & Scenarios",
         "Pair Regimes",
         "Fed Hiking vs Cutting",
+        "G10 vs US",
     ]
 )
 with tab_macro:
@@ -106,3 +127,12 @@ with tab_pair_regimes:
     pair_regimes_tab.render(data["pairs"], data["dollar"], data["macro"], start, fed_target)
 with tab_fed:
     fed_tab.render(data["pairs"], data["dollar"], data["macro"], start, fed_target)
+with tab_g10:
+    g10_tab.render(
+        data["macro"],
+        data["pairs"] | data.get("g10_pairs", {}),
+        data.get("us_extra", {}),
+        start,
+        fed_target,
+        country_data,
+    )

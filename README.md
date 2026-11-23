@@ -25,6 +25,13 @@ Streamlit dashboard analysing how US macro variables relate to FX movements.
 5. **Fed Hiking vs Cutting** – USD returns against each currency and the broad dollar
    index while the Fed is hiking, on hold or cutting: averages, annualised returns,
    hit rates, a hiking-minus-cutting t-stat and cycle-by-cycle cumulative moves.
+6. **G10 vs US** – pick any of the 11 other G10 economies and a variable (policy rate,
+   short rate, yield curve, inflation, growth). Each side gets its own regime (e.g. Fed
+   hiking vs BoJ on hold); a 3×3 grid shows USD/that currency in every combination, plus
+   the spot when the US-minus-foreign gap rises or falls and a gap-vs-spot regression.
+   Like for like: 3M-rate economies are compared with the US 3M bill (FRED DTB3) and
+   10Y−3M spread (T10Y3M); the UK with the US 2Y and 10Y−2Y. Adds USDAUD, USDCAD, USDNZD,
+   USDNOK and USDSEK from FRED.
 
 Fed regimes are dated from the Fed's policy target (FRED DFEDTAR to Dec 2008, then the
 upper bound DFEDTARU), not the monthly-average effective rate. By default a pause between

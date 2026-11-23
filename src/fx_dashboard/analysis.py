@@ -147,6 +147,28 @@ def episode_returns(returns: dict[str, pd.Series], regime: pd.Series) -> pd.Data
     return pd.DataFrame(rows)
 
 
+def joint_regime_stats(ret: pd.Series, a: pd.Series, b: pd.Series) -> pd.DataFrame:
+    """Return statistics for every combination of two regime series (e.g. US vs Japan)."""
+    df = pd.concat({"ret": ret, "a": a, "b": b}, axis=1).dropna()
+    rows = []
+    for ra in REGIME_ORDER:
+        for rb in REGIME_ORDER:
+            r = df.loc[(df["a"] == ra) & (df["b"] == rb), "ret"].astype(float)
+            if r.empty:
+                continue
+            rows.append(
+                {
+                    "a": ra,
+                    "b": rb,
+                    "mean": r.mean(),
+                    "ann": _annualised(r),
+                    "hit_rate": (r > 0).mean() * 100,
+                    "n": len(r),
+                }
+            )
+    return pd.DataFrame(rows, columns=["a", "b", "mean", "ann", "hit_rate", "n"])
+
+
 def pair_regime_stats(returns: dict[str, pd.Series], regimes: pd.DataFrame) -> pd.DataFrame:
     """regime_stats for several return series, stacked with a 'pair' column."""
     frames = [regime_stats(r, regimes).assign(pair=name) for name, r in returns.items()]

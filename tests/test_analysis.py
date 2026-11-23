@@ -8,6 +8,7 @@ from fx_dashboard.analysis import (
     episode_returns,
     fed_regime,
     fit_sensitivity,
+    joint_regime_stats,
     macro_drivers,
     pair_regime_stats,
     policy_cycle,
@@ -166,3 +167,15 @@ def test_regime_stats_annualised_and_episodes():
     assert list(ep["regime"]) == ["Up", "Down"]
     assert ep.loc[0, "X"] == pytest.approx(21.0)
     assert ep.loc[1, "quarters"] == 2
+
+
+def test_joint_regime_stats():
+    idx = pd.date_range("2020-03-31", periods=6, freq="QE")
+    ret = pd.Series([1.0, 2.0, -1.0, 3.0, 0.5, -2.0], index=idx)
+    us = pd.Series(["Up", "Up", "Down", "Up", "Flat", "Down"], index=idx)
+    fx = pd.Series(["Flat", "Flat", "Down", "Up", "Flat", None], index=idx)
+    js = joint_regime_stats(ret, us, fx).set_index(["a", "b"])
+    assert js.loc[("Up", "Flat"), "mean"] == pytest.approx(1.5)
+    assert js.loc[("Up", "Flat"), "n"] == 2 and js.loc[("Up", "Flat"), "hit_rate"] == 100
+    assert js.loc[("Down", "Down"), "n"] == 1
+    assert js["n"].sum() == 5  # the quarter with no foreign regime is dropped

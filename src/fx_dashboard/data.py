@@ -12,7 +12,15 @@ from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
 
 from fx_dashboard.countries import Country, Source
-from fx_dashboard.series import DOLLAR_INDEX, FED_TARGET_IDS, FX_PAIRS, MACRO_VARS, FxPair
+from fx_dashboard.series import (
+    DOLLAR_INDEX,
+    FED_TARGET_IDS,
+    FX_PAIRS,
+    G10_PAIRS,
+    MACRO_VARS,
+    US_EXTRA,
+    FxPair,
+)
 
 FRED_CSV_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
 # The official FRED API. The CSV download above needs no key but can hang when called from
@@ -276,8 +284,18 @@ def load_all() -> dict:
     jobs |= {("pairs", k): (load_pair, p) for k, p in FX_PAIRS.items()}
     jobs[("dollar", DOLLAR_INDEX)] = (load_fred_series, DOLLAR_INDEX)
     jobs[("fed_target", "Fed target rate")] = (lambda _: load_fed_target(), None)
+    jobs |= {("g10_pairs", k): (load_pair, p) for k, p in G10_PAIRS.items()}
+    jobs |= {("us_extra", k): (load_fred_series, k) for k in US_EXTRA}
 
-    out: dict = {"macro": {}, "pairs": {}, "dollar": None, "fed_target": None, "errors": {}}
+    out: dict = {
+        "macro": {},
+        "pairs": {},
+        "g10_pairs": {},
+        "us_extra": {},
+        "dollar": None,
+        "fed_target": None,
+        "errors": {},
+    }
     with ThreadPoolExecutor(max_workers=8) as pool:
         futures = {key: pool.submit(fn, arg) for key, (fn, arg) in jobs.items()}
         for (group, name), fut in futures.items():
