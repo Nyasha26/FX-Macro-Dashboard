@@ -32,6 +32,22 @@ Streamlit dashboard analysing how US macro variables relate to FX movements.
    Like for like: 3M-rate economies are compared with the US 3M bill (FRED DTB3) and
    10Y−3M spread (T10Y3M); the UK with the US 2Y and 10Y−2Y. Adds USDAUD, USDCAD, USDNZD,
    USDNOK and USDSEK from FRED.
+   **2Y govt yield** (Germany, Japan, UK): daily US 2Y Treasury minus the 2Y Bund / JGB /
+   gilt, with the spot, a 52-week rolling correlation, spot % per 10bp of differential
+   (1Y, 3Y, whole sample), the spot level implied by the gap, and a daily CSV.
+
+### 2Y government yields (bundled)
+
+FRED has no 2Y government yields outside the US, so they come from downloaded files:
+Bundesbank (current 2Y Federal note), Ministry of Finance Japan (JGB 2Y) and the Bank of
+England daily nominal spot curve (2.0 years). Only the 2Y columns are kept, in
+`src/fx_dashboard/resources/yields_2y.csv`. To update, download fresh copies of
+`2yr Bund Yields.csv`, `JGB_YIELDS .csv` and `Gilt spot curve.csv` into one folder, then:
+
+```powershell
+python -m fx_dashboard.yields2y "C:\path\to\folder"
+git add src/fx_dashboard/resources/yields_2y.csv; git commit -m "Update 2Y yields"; git push
+```
 
 Fed regimes are dated from the Fed's policy target (FRED DFEDTAR to Dec 2008, then the
 upper bound DFEDTARU), not the monthly-average effective rate. By default a pause between

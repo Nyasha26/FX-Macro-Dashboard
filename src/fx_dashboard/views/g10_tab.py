@@ -10,16 +10,20 @@ import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
 
+from fx_dashboard import yields2y
 from fx_dashboard.analysis import (
     REGIME_ORDER,
     classify,
     fit_sensitivity,
+    gap_betas,
+    gap_implied_spot,
     joint_regime_stats,
     pct,
     policy_cycle,
     quarterly_returns,
     regime_stats,
     to_quarterly,
+    weekly_spot_and_gap,
 )
 from fx_dashboard.countries import COUNTRIES, Country
 from fx_dashboard.series import MACRO_VARS, US_3M, US_10Y3M
@@ -40,14 +44,19 @@ from fx_dashboard.theme import (
 
 COMPARE = {
     "FEDFUNDS": "Policy rate",
+    "Y2": "2Y govt yield",
     "DGS2": "Short rate",
     "T10Y2Y": "Yield curve",
     "CPI": "Inflation",
     "GDP": "Growth",
 }
-RATES = {"FEDFUNDS", "DGS2", "T10Y2Y"}  # compared in levels; CPI and GDP as y/y % change
+# Compared in levels; CPI and GDP as y/y % change.
+RATES = {"FEDFUNDS", "Y2", "DGS2", "T10Y2Y"}
+# 2Y government yields from the bundled Bundesbank / MoF Japan / Bank of England files.
+Y2 = yields2y.load()
 NAMES = {
     "FEDFUNDS": {"Up": "Hiking", "Flat": "On hold", "Down": "Cutting"},
+    "Y2": {"Up": "Rising", "Flat": "Steady", "Down": "Falling"},
     "DGS2": {"Up": "Rising", "Flat": "Steady", "Down": "Falling"},
     "T10Y2Y": {"Up": "Steepening", "Flat": "Steady", "Down": "Flattening"},
     "CPI": {"Up": "Rising", "Flat": "Steady", "Down": "Falling"},
@@ -93,6 +102,12 @@ def _sides(
     fdata: dict,
 ) -> tuple[Side | None, Side | None, str]:
     """US and foreign series for one comparison, plus a note on any mismatch."""
+    if key == "Y2":
+        us = Side(macro["DGS2"], "2Y Treasury yield", "US", "M")
+        fx_raw = Y2.get(country.code)
+        label = yields2y.LABELS.get(country.code, "")
+        fx = Side(fx_raw, label, country.name, "M") if fx_raw is not None else None
+        return us, fx, ""
     fvar = country.vars[key]
     proxy = fvar.short == "3M rate"  # the foreign short end is a 3M rate, not a 2Y yield
     note = ""
@@ -215,7 +230,12 @@ def render(
         )
         band_rate = (
             c.number_input(
-                "Short rate & curve: steady band (bps)", 0, 100, 10, 5, key="g10_band_rate"
+                "Yields, short rate & curve: steady band (bps)",
+                0,
+                100,
+                10,
+                5,
+                key="g10_band_rate",
             )
             / 100
         )
@@ -231,6 +251,15 @@ def render(
     fdata = load_country(code)
     px = pairs.get(pair)
     us, fx, note = _sides(key, macro, fed_target, us_extra, country, fdata)
+    if fx is None and key == "Y2":
+        names = [COUNTRIES[c].name for c in Y2]
+        names = ", ".join(names[:-1]) + " and " + names[-1] if len(names) > 1 else "".join(names)
+        st.info(
+            f"2Y government yields (from the Bundesbank, MoF Japan and Bank of England files) "
+            f"cover {names}. Pick one of those, or choose **Short rate** to compare "
+            f"{country.name}'s 3-month rate with the US 3-month bill."
+        )
+        return
     if fx is None:
         st.warning(
             f"{country.name}'s {COMPARE[key].lower()} failed to load: "
@@ -244,7 +273,7 @@ def render(
         st.info(note)
 
     start_ts = pd.Timestamp(start)
-    band = band_rate if key in ("DGS2", "T10Y2Y") else band_idx
+    band = band_rate if key in ("Y2", "DGS2", "T10Y2Y") else band_idx
     us_q, fx_q = _quarterly(key, us), _quarterly(key, fx)
     us_reg = _regime(key, us_q, us.band if us.band is not None else band, cycle, max_pause)
     fx_reg = _regime(key, fx_q, fx.band if fx.band is not None else band, cycle, max_pause)
@@ -264,6 +293,9 @@ def render(
         return
 
     _snapshot(macro, fed_target, us_extra, country, fdata)
+    if key == "Y2":
+        _y2_differential(us, fx, px, pair, start_ts, country)
+        st.markdown(f"**Quarterly regimes: 2Y Treasury vs {fx.label}**")
     _tiles(key, us, fx, us_reg, fx_reg, gap_q, js, pair, m, measure_label)
     _timeline(key, us, fx, px, us_reg, fx_reg, gap_reg, start_ts, country, pair)
     left, right = st.columns([3, 2])
@@ -311,8 +343,9 @@ def _snapshot(macro, fed_target, us_extra, country: Country, fdata: dict) -> Non
         rows.append(
             {
                 "Variable": f"{label} ({_unit(k)})",
-                "United States": us_m.iloc[-1],
-                country.name: fx_m.iloc[-1],
+                # both sides on the gap's date, so the columns subtract to the gap
+                "United States": us_m[gap.index[-1]],
+                country.name: fx_m[gap.index[-1]],
                 f"Gap (US − {country.code})": gap.iloc[-1],
                 "Gap a year earlier": ago,
                 "Gap change": gap.iloc[-1] - ago,
@@ -335,6 +368,165 @@ def _snapshot(macro, fed_target, us_extra, country: Country, fdata: dict) -> Non
             "Gap a year earlier": chg,
             "Gap change": chg,
         },
+    )
+
+
+BETA_WINDOWS = {"Last 1 year": 52, "Last 3 years": 156, "Whole sample": None}
+
+
+def _ordinal(n: int) -> str:
+    suffix = "th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
+def _y2_differential(us: Side, fx: Side, px: pd.Series, pair: str, start_ts, country) -> None:
+    """Daily US 2Y Treasury minus foreign 2Y government yield, and how the spot tracks it."""
+    st.markdown(f"**2Y yield differential and {pair}** · US 2Y Treasury − {fx.label}, daily")
+    daily = pd.concat({"us": us.raw, "fx": fx.raw}, axis=1).dropna()
+    daily = daily[daily.index >= start_ts]
+    if len(daily) < 60:
+        st.info("Too few days where both 2Y yields are available in the selected sample.")
+        return
+    gap = (daily["us"] - daily["fx"]).rename("gap")
+    last = gap.index[-1]
+
+    def change_bp(months: int) -> float:
+        base = gap.asof(last - pd.DateOffset(months=months))
+        return (gap.iloc[-1] - base) * 100
+
+    weekly = weekly_spot_and_gap(px[px.index >= start_ts], gap)
+    cols = st.columns(5)
+    cols[0].metric("US 2Y Treasury", f"{daily['us'].iloc[-1]:.2f}%")
+    cols[1].metric(fx.label, f"{daily['fx'].iloc[-1]:.2f}%")
+    cols[2].metric(
+        f"Differential (US − {country.code})",
+        f"{gap.iloc[-1]:+.2f}pp",
+        delta=f"{change_bp(1):+.0f}bp 1M · {change_bp(3):+.0f}bp 3M · {change_bp(12):+.0f}bp 1Y",
+        delta_color="off",
+        delta_arrow="off",
+        help=f"As of {last:%d %b %Y}, the latest day both yields are available.",
+    )
+    pctile = (gap <= gap.iloc[-1]).mean() * 100
+    cols[3].metric(
+        "Percentile of history",
+        _ordinal(round(pctile)),
+        help=f"Share of days since {gap.index[0]:%b %Y} with a differential at or below today's.",
+    )
+    if len(weekly) >= 52:
+        implied, _, r2 = gap_implied_spot(weekly, 52)
+        spot_now = weekly["spot"].iloc[-1]
+        cols[4].metric(
+            f"{pair} implied by the gap",
+            f"{implied:.4g}",
+            delta=f"spot {spot_now:.4g}, {(spot_now / implied - 1) * 100:+.1f}% vs implied",
+            delta_color="off",
+            delta_arrow="off",
+            help=f"Straight-line fit of weekly {pair} on the 2Y differential over the last 52 "
+            f"weeks (R² {r2:.2f}), evaluated at today's differential. A rough gauge of how far "
+            "spot sits from what the rate gap alone suggests, not a forecast.",
+        )
+
+    gap_w = weekly["gap"]
+    chg = pd.DataFrame({"y": pct(weekly["spot"]), "x": gap_w.diff()}).dropna()
+    corr = chg["y"].rolling(52).corr(chg["x"]).dropna()
+    fig = make_subplots(
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        row_heights=[0.68, 0.32],
+        vertical_spacing=0.06,
+        specs=[[{"secondary_y": True}], [{}]],
+    )
+    fig.add_scatter(
+        x=weekly.index,
+        y=weekly["spot"],
+        mode="lines",
+        name=f"{pair} (left)",
+        line=dict(color=INK, width=2),
+        hovertemplate="%{x|%d %b %Y}<br>" + pair + " %{y:.4g}<extra></extra>",
+        row=1,
+        col=1,
+        secondary_y=False,
+    )
+    fig.add_scatter(
+        x=gap_w.index,
+        y=gap_w.values,
+        mode="lines",
+        name=f"US − {country.name} 2Y, pp (right)",
+        line=dict(color=US_COLOR, width=2),
+        hovertemplate="%{x|%d %b %Y}<br>Differential %{y:+.2f}pp<extra></extra>",
+        row=1,
+        col=1,
+        secondary_y=True,
+    )
+    fig.add_scatter(
+        x=corr.index,
+        y=corr.values,
+        mode="lines",
+        name="52-week correlation of weekly changes",
+        line=dict(color=FX_COLOR, width=2),
+        fill="tozeroy",
+        fillcolor="rgba(217,89,38,0.2)",
+        hovertemplate="%{x|%d %b %Y}<br>Correlation %{y:.2f}<extra></extra>",
+        row=2,
+        col=1,
+    )
+    fig.add_hline(y=0, line=dict(color=AXIS, width=1), row=2, col=1)
+    fig.update_yaxes(title_text=pair, row=1, col=1, secondary_y=False)
+    fig.update_yaxes(
+        title_text="US − foreign 2Y, pp", row=1, col=1, secondary_y=True, showgrid=False
+    )
+    fig.update_yaxes(title_text="correlation", range=[-1, 1], row=2, col=1)
+    fig.update_layout(hovermode="x unified")
+    show(fig, height=560)
+
+    betas = gap_betas(weekly, BETA_WINDOWS)
+    if not betas.empty:
+        table = pd.DataFrame(
+            {
+                "Window": betas["window"],
+                "From": betas["from"].dt.strftime("%b %Y"),
+                f"{pair} % per 10bp wider gap": betas["beta_10bp"],
+                "t-stat": betas["t"],
+                "Correlation": betas["corr"],
+                "R²": betas["r2"],
+                "Weeks": betas["weeks"],
+            }
+        )
+        two = st.column_config.NumberColumn(format="%.2f")
+        st.dataframe(
+            table,
+            hide_index=True,
+            width="stretch",
+            column_config={
+                f"{pair} % per 10bp wider gap": st.column_config.NumberColumn(format="%+.2f"),
+                "t-stat": st.column_config.NumberColumn(format="%.1f"),
+                "Correlation": two,
+                "R²": two,
+            },
+        )
+        b = betas.iloc[0]
+        verdict = "a reliable link" if abs(b["t"]) >= 2 else "too noisy to call a reliable link"
+        st.caption(
+            f"{b['window']}: each 10bp the US–{country.name} 2Y differential widened went with "
+            f"{pair} {b['beta_10bp']:+.2f}% the same week (correlation {b['corr']:.2f}, "
+            f"t = {b['t']:.1f}): {verdict}. Positive = the textbook case, a wider US yield "
+            "advantage goes with a stronger dollar. Weekly changes, Friday to Friday."
+        )
+    st.caption(
+        f"US 2Y: FRED DGS2. {country.name} 2Y: {yields2y.SOURCES[country.code]}, from your "
+        f"downloaded file (last observation {fx.raw.index[-1]:%d %b %Y}). To extend it, "
+        "download fresh copies of the three files and run "
+        '`python -m fx_dashboard.yields2y "<folder>"`.'
+    )
+    out = daily.assign(gap=gap).join(px.rename(pair), how="left")
+    out.columns = ["US 2Y %", f"{country.code} 2Y %", "Differential pp", pair]
+    st.download_button(
+        "Download daily differential CSV",
+        out.sort_index(ascending=False).to_csv().encode(),
+        file_name=f"us_vs_{country.code.lower()}_2y_differential.csv",
+        mime="text/csv",
+        key="g10_y2_csv",
     )
 
 

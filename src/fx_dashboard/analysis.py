@@ -169,6 +169,52 @@ def joint_regime_stats(ret: pd.Series, a: pd.Series, b: pd.Series) -> pd.DataFra
     return pd.DataFrame(rows, columns=["a", "b", "mean", "ann", "hit_rate", "n"])
 
 
+def weekly_spot_and_gap(spot: pd.Series, gap: pd.Series) -> pd.DataFrame:
+    """Friday spot level and yield gap (pp), on weeks where both have a value."""
+    both = pd.concat({"spot": spot, "gap": gap}, axis=1).dropna()
+    return both.resample("W-FRI").last().dropna()
+
+
+def gap_betas(weekly: pd.DataFrame, windows: dict[str, int | None]) -> pd.DataFrame:
+    """Weekly spot % change regressed on the weekly change in the yield gap.
+
+    windows maps a label to a number of trailing weeks (None = all). beta_10bp is the spot %
+    move per 10bp widening of the gap, with HC1 robust t-statistics.
+    """
+    df = pd.DataFrame(
+        {"y": pct(weekly["spot"]), "x": weekly["gap"].diff() * 100}  # x in basis points
+    ).dropna()
+    rows = []
+    for label, n in windows.items():
+        sub = df if n is None else df.iloc[-n:]
+        sens = fit_sensitivity(sub["y"], sub[["x"]], min_obs=20)
+        if sens is None:
+            continue
+        rows.append(
+            {
+                "window": label,
+                "from": sub.index[0],
+                "beta_10bp": float(sens.beta["x"]) * 10,
+                "t": float(sens.tstat["x"]),
+                "corr": float(sub["x"].corr(sub["y"])),
+                "r2": sens.r2,
+                "weeks": sens.nobs,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def gap_implied_spot(weekly: pd.DataFrame, weeks: int = 52) -> tuple[float, float, float]:
+    """Spot implied by the current gap from a trailing levels fit: (implied, slope, R²)."""
+    sub = weekly.iloc[-weeks:]
+    slope, intercept = np.polyfit(sub["gap"], sub["spot"], 1)
+    fitted = intercept + slope * sub["gap"]
+    ss_res = float(((sub["spot"] - fitted) ** 2).sum())
+    ss_tot = float(((sub["spot"] - sub["spot"].mean()) ** 2).sum())
+    r2 = 1 - ss_res / ss_tot if ss_tot > 0 else np.nan
+    return float(intercept + slope * sub["gap"].iloc[-1]), float(slope), r2
+
+
 def pair_regime_stats(returns: dict[str, pd.Series], regimes: pd.DataFrame) -> pd.DataFrame:
     """regime_stats for several return series, stacked with a 'pair' column."""
     frames = [regime_stats(r, regimes).assign(pair=name) for name, r in returns.items()]
