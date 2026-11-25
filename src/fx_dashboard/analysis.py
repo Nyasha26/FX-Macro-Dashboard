@@ -304,3 +304,97 @@ def trailing_returns(s: pd.Series) -> dict[str, float]:
 def rebase(s: pd.Series, start) -> pd.Series:
     s = s[s.index >= pd.Timestamp(start)].dropna()
     return s / s.iloc[0] * 100 if not s.empty else s
+
+
+@dataclass(frozen=True)
+class Regression:
+    """OLS fit with robust (HC1) standard errors, kept whole for tables, charts and tests."""
+
+    coef: pd.DataFrame  # per regressor: coef, se, t, p, sd, impact (coef x sd)
+    const: float
+    r2: float
+    adj_r2: float
+    f_pvalue: float  # joint test that every slope is zero (robust)
+    nobs: int
+    y: pd.Series
+    X: pd.DataFrame
+    fitted: pd.Series
+    resid: pd.Series
+    res: object  # statsmodels results, for restriction tests
+
+    def contributions(self) -> pd.DataFrame:
+        """Each regressor's part of every period's fitted value (coef x value)."""
+        return self.X * self.coef["coef"]
+
+
+def ols(y: pd.Series, X: pd.DataFrame, min_obs: int = 12) -> Regression | None:
+    """Regress y on X (plus a constant) with HC1 errors; None if too few observations.
+
+    Columns without variation in the sample are dropped (they cannot be estimated).
+    impact = coefficient x the regressor's standard deviation: the move in y that goes with
+    a typical (one-s.d.) move in that regressor, so drivers in different units compare.
+    """
+    df = pd.concat([y.rename("_y"), X], axis=1).dropna()
+    cols = [c for c in X.columns if df[c].std() > 0]
+    if not cols or len(df) < max(min_obs, len(cols) + 5):
+        return None
+    res = sm.OLS(df["_y"], sm.add_constant(df[cols], has_constant="add")).fit(cov_type="HC1")
+    sd = df[cols].std()
+    coef = pd.DataFrame(
+        {
+            "coef": res.params[cols],
+            "se": res.bse[cols],
+            "t": res.tvalues[cols],
+            "p": res.pvalues[cols],
+            "sd": sd,
+            "impact": res.params[cols] * sd,
+        }
+    )
+    return Regression(
+        coef=coef,
+        const=float(res.params["const"]),
+        r2=float(res.rsquared),
+        adj_r2=float(res.rsquared_adj),
+        f_pvalue=float(np.squeeze(res.f_pvalue)),
+        nobs=int(res.nobs),
+        y=df["_y"],
+        X=df[cols],
+        fitted=res.fittedvalues,
+        resid=res.resid,
+        res=res,
+    )
+
+
+def equal_and_opposite_pvalue(reg: Regression, pairs: list[tuple[str, str]]) -> float:
+    """Robust Wald p-value that coef(a) = -coef(b) for every (a, b) pair jointly.
+
+    With a = the US variable and b = its foreign counterpart, a high p-value means the data
+    are consistent with only the US-minus-foreign gap mattering.
+    """
+    have = [(a, b) for a, b in pairs if a in reg.coef.index and b in reg.coef.index]
+    if not have:
+        return np.nan
+    names = list(reg.res.params.index)
+    R = np.zeros((len(have), len(names)))
+    for i, (a, b) in enumerate(have):
+        R[i, names.index(a)] = 1.0
+        R[i, names.index(b)] = 1.0
+    return float(np.squeeze(reg.res.f_test(R).pvalue))
+
+
+def rolling_ols(y: pd.Series, X: pd.DataFrame, window: int) -> dict[str, pd.DataFrame]:
+    """Coefficients and t-stats from OLS over each trailing window of observations."""
+    df = pd.concat([y.rename("_y"), X], axis=1).dropna()
+    coefs, tstats = {}, {}
+    for end in range(window, len(df) + 1):
+        sub = df.iloc[end - window : end]
+        reg = ols(sub["_y"], sub[X.columns], min_obs=window)
+        if reg is None:
+            continue
+        coefs[sub.index[-1]] = reg.coef["coef"]
+        tstats[sub.index[-1]] = reg.coef["t"]
+    cols = list(X.columns)
+    return {
+        "coef": pd.DataFrame(coefs).T.reindex(columns=cols),
+        "t": pd.DataFrame(tstats).T.reindex(columns=cols),
+    }

@@ -23,6 +23,7 @@ from fx_dashboard.views import (
     macro_tab,
     pair_regimes_tab,
     pairs_tab,
+    regression_tab,
 )
 
 TITLE = "Nyasha Mugabe FX Macro Dashboard"
@@ -107,7 +108,7 @@ if missing or data["dollar"] is None:
 
 st.title(TITLE)
 fed_target = data.get("fed_target")
-tab_macro, tab_dollar, tab_pairs, tab_pair_regimes, tab_fed, tab_g10 = st.tabs(
+tab_macro, tab_dollar, tab_pairs, tab_pair_regimes, tab_fed, tab_g10, tab_reg = st.tabs(
     [
         "Macro Variables",
         "Dollar Index Regimes",
@@ -115,6 +116,7 @@ tab_macro, tab_dollar, tab_pairs, tab_pair_regimes, tab_fed, tab_g10 = st.tabs(
         "Pair Regimes",
         "Fed Hiking vs Cutting",
         "G10 vs US",
+        "Regression",
     ]
 )
 with tab_macro:
@@ -129,6 +131,15 @@ with tab_fed:
     fed_tab.render(data["pairs"], data["dollar"], data["macro"], start, fed_target)
 with tab_g10:
     g10_tab.render(
+        data["macro"],
+        data["pairs"] | data.get("g10_pairs", {}),
+        data.get("us_extra", {}),
+        start,
+        fed_target,
+        country_data,
+    )
+with tab_reg:
+    regression_tab.render(
         data["macro"],
         data["pairs"] | data.get("g10_pairs", {}),
         data.get("us_extra", {}),

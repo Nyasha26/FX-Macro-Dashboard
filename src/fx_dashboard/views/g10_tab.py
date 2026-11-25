@@ -93,7 +93,7 @@ class Side:
     band: float | None = None  # policy only: deadband for a "move"
 
 
-def _sides(
+def sides(
     key: str,
     macro: dict[str, pd.Series],
     fed_target: pd.Series | None,
@@ -138,7 +138,7 @@ def _sides(
     return us, fx, note
 
 
-def _quarterly(key: str, side: Side) -> pd.Series:
+def quarterly_values(key: str, side: Side) -> pd.Series:
     """Quarter-end level for rates; y/y % change for CPI and GDP."""
     q = to_quarterly(side.raw)
     return q if key in RATES else pct(q, 4)
@@ -250,7 +250,7 @@ def render(
 
     fdata = load_country(code)
     px = pairs.get(pair)
-    us, fx, note = _sides(key, macro, fed_target, us_extra, country, fdata)
+    us, fx, note = sides(key, macro, fed_target, us_extra, country, fdata)
     if fx is None and key == "Y2":
         names = [COUNTRIES[c].name for c in Y2]
         names = ", ".join(names[:-1]) + " and " + names[-1] if len(names) > 1 else "".join(names)
@@ -274,7 +274,7 @@ def render(
 
     start_ts = pd.Timestamp(start)
     band = band_rate if key in ("Y2", "DGS2", "T10Y2Y") else band_idx
-    us_q, fx_q = _quarterly(key, us), _quarterly(key, fx)
+    us_q, fx_q = quarterly_values(key, us), quarterly_values(key, fx)
     us_reg = _regime(key, us_q, us.band if us.band is not None else band, cycle, max_pause)
     fx_reg = _regime(key, fx_q, fx.band if fx.band is not None else band, cycle, max_pause)
     gap_q = (us_q - fx_q).dropna()
@@ -332,7 +332,7 @@ def _snapshot(macro, fed_target, us_extra, country: Country, fdata: dict) -> Non
     """Latest value of every variable for both economies and the gap between them."""
     rows = []
     for k, label in COMPARE.items():
-        us, fx, _ = _sides(k, macro, fed_target, us_extra, country, fdata)
+        us, fx, _ = sides(k, macro, fed_target, us_extra, country, fdata)
         if fx is None:
             continue
         us_m, fx_m = _monthly(k, us), _monthly(k, fx)

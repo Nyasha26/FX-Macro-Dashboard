@@ -35,6 +35,14 @@ Streamlit dashboard analysing how US macro variables relate to FX movements.
    **2Y govt yield** (Germany, Japan, UK): daily US 2Y Treasury minus the 2Y Bund / JGB /
    gilt, with the spot, a 52-week rolling correlation, spot % per 10bp of differential
    (1Y, 3Y, whole sample), the spot level implied by the gap, and a daily CSV.
+7. **Regression** – what drives USD against each G10 currency. Quarterly % change in the
+   pair regressed (OLS, robust HC1 errors) on the quarterly change in inflation (CPI y/y),
+   growth (real GDP y/y) and the 2Y yield (3M rate where no 2Y is available), toggled
+   between the **US-minus-foreign gap** and **US and foreign variables separately**, same or
+   next quarter. Shows R², coefficients per 1pp and per typical move with t-stats, a test of
+   whether only the gap matters (US coefficient = minus the foreign one), each driver's
+   contribution to every quarter's move, rolling coefficients, and the same model across all
+   11 economies.
 
 ### 2Y government yields (bundled)
 
